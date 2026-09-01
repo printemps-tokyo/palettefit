@@ -1,0 +1,45 @@
+[package]
+name = "palettefit"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Audit character art and brand assets for color drift: extract a reference palette, then score other images against it with CIEDE2000. Offline Rust CLI."
+authors = ["printemps.tokyo <develop@printemps.tokyo>"]
+repository = "https://github.com/printemps-tokyo/palettefit"
+homepage = "https://github.com/printemps-tokyo/palettefit"
+readme = "README.md"
+keywords = ["color", "palette", "ciede2000", "character-design", "cli"]
+categories = ["command-line-utilities", "multimedia::images"]
+
+[[bin]]
+name = "palettefit"
+path = "src/main.rs"
+
+[lib]
+name = "palettefit"
+path = "src/lib.rs"
+
+[dependencies]
+# Error context for the thin binary layer (org convention).
+anyhow = "1"
+# Argument parsing (derive API, org convention).
+clap = { version = "4", features = ["derive"] }
+# Decoding only. default-features are off so just the three formats character
+# art actually ships in are compiled in. Palette extraction, Lab conversion
+# and CIEDE2000 are implemented in this crate over the decoded RGBA buffer,
+# so no color-science dependency is involved.
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "webp",
+] }
+
+[dev-dependencies]
+# Scratch directories for the CLI integration tests.
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
