@@ -2,6 +2,7 @@
 name = "palettefit"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 license = "MIT"
 description = "Audit character art and brand assets for color drift: extract a reference palette, then score other images against it with CIEDE2000. Offline Rust CLI."
 authors = ["printemps.tokyo <develop@printemps.tokyo>"]
