@@ -183,10 +183,17 @@ fn transparent_background_needs_no_bg_flag() {
 fn contrast_checks_pairs_and_export_writes_both_formats() {
     let dir = tempfile::tempdir().unwrap();
     let pal = dir.path().join("p.palette");
-    std::fs::write(&pal, "# name: Test\nffffff 0.5 paper\n1d3557 0.3 ink\n777777 0.2 grey\n").unwrap();
+    std::fs::write(
+        &pal,
+        "# name: Test\nffffff 0.5 paper\n1d3557 0.3 ink\n777777 0.2 grey\n",
+    )
+    .unwrap();
     let pal_s = pal.to_str().unwrap();
 
-    let all = Command::new(BIN).args(["contrast", pal_s, "--no-color"]).output().unwrap();
+    let all = Command::new(BIN)
+        .args(["contrast", pal_s, "--no-color"])
+        .output()
+        .unwrap();
     assert_eq!(all.status.code(), Some(0), "listing never fails");
     assert_eq!(String::from_utf8_lossy(&all.stdout).lines().count(), 4);
 
@@ -196,10 +203,20 @@ fn contrast_checks_pairs_and_export_writes_both_formats() {
         .unwrap();
     assert_eq!(ok.status.code(), Some(0));
     let bad = Command::new(BIN)
-        .args(["contrast", pal_s, "--pairs", "ink:paper,grey:paper", "--json"])
+        .args([
+            "contrast",
+            pal_s,
+            "--pairs",
+            "ink:paper,grey:paper",
+            "--json",
+        ])
         .output()
         .unwrap();
-    assert_eq!(bad.status.code(), Some(1), "#777777 on white is below 4.5:1");
+    assert_eq!(
+        bad.status.code(),
+        Some(1),
+        "#777777 on white is below 4.5:1"
+    );
     let doc = String::from_utf8_lossy(&bad.stdout);
     assert!(doc.contains("\"standard\": \"WCAG 2.2\"") && doc.contains("\"pass\": false"));
 
@@ -210,12 +227,24 @@ fn contrast_checks_pairs_and_export_writes_both_formats() {
             .args(["export", pal_s, "-o", out.to_str().unwrap()])
             .output()
             .unwrap();
-        assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(
+            o.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&o.stderr)
+        );
     }
-    assert!(std::fs::read_to_string(&gpl).unwrap().starts_with("GIMP Palette\nName: Test\n"));
+    assert!(std::fs::read_to_string(&gpl)
+        .unwrap()
+        .starts_with("GIMP Palette\nName: Test\n"));
     assert_eq!(&std::fs::read(&ase).unwrap()[0..4], b"ASEF");
     let unknown = Command::new(BIN)
-        .args(["export", pal_s, "-o", dir.path().join("p.txt").to_str().unwrap()])
+        .args([
+            "export",
+            pal_s,
+            "-o",
+            dir.path().join("p.txt").to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert_eq!(unknown.status.code(), Some(2));
