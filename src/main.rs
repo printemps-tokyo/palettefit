@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use palettefit::check::{self, CheckReport, Thresholds};
 use palettefit::color::delta_e_rgb;
+use palettefit::contrast::{self, Level, PairResult};
 use palettefit::input::{sample, BgMode, SampledImage};
 use palettefit::json;
 use palettefit::palette::Palette;
@@ -82,6 +83,36 @@ enum Command {
         /// Disable ANSI colors
         #[arg(long)]
         no_color: bool,
+    },
+    /// WCAG 2.2 contrast ratios between palette colors
+    Contrast {
+        /// Palette file
+        palette: PathBuf,
+        /// Pairs to hold to --level, as fg:bg (labels or hex), comma-separated;
+        /// without it every pair is listed and nothing fails
+        #[arg(long)]
+        pairs: Option<String>,
+        /// Minimum for --pairs: aa (4.5), aa-large (3), aaa (7), aaa-large (4.5),
+        /// non-text (3)
+        #[arg(long, default_value = "aa", value_parser = Level::parse)]
+        level: Level,
+        /// Machine-readable JSON on stdout
+        #[arg(long)]
+        json: bool,
+        /// Disable ANSI colors
+        #[arg(long)]
+        no_color: bool,
+    },
+    /// Export a palette for design tools (GIMP .gpl, Adobe .ase)
+    Export {
+        /// Palette file
+        palette: PathBuf,
+        /// Output file; .gpl or .ase picks the format unless --format is given
+        #[arg(short, long)]
+        out: PathBuf,
+        /// gpl or ase
+        #[arg(long)]
+        format: Option<String>,
     },
     /// Compare the palettes of two images directly
     Diff {
@@ -220,6 +251,63 @@ fn run(cli: Cli) -> Result<ExitCode> {
             } else {
                 ExitCode::SUCCESS
             })
+        }
+        Command::Contrast {
+            palette,
+            pairs,
+            level,
+            json,
+            no_color,
+        } => {
+            let pal = Palette::load(&palette)?;
+            let checked = pairs.is_some();
+            let results = match &pairs {
+                Some(spec) => contrast::pairs(&pal, spec).map_err(anyhow::Error::msg)?,
+                None => contrast::all_pairs(&pal),
+            };
+            let failed = checked && results.iter().any(|r| !r.meets_level(level));
+            if json {
+                println!("{}", contrast_json(&results, checked.then_some(level)));
+            } else {
+                print!(
+                    "{}",
+                    contrast_text(
+                        &style(no_color),
+                        &palette,
+                        &results,
+                        checked.then_some(level)
+                    )
+                );
+            }
+            Ok(ExitCode::from(u8::from(failed)))
+        }
+        Command::Export {
+            palette,
+            out,
+            format,
+        } => {
+            let pal = Palette::load(&palette)?;
+            let format = match format {
+                Some(f) => f.to_ascii_lowercase(),
+                None => out
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(str::to_ascii_lowercase)
+                    .unwrap_or_default(),
+            };
+            match format.as_str() {
+                "gpl" => std::fs::write(&out, palettefit::export::to_gpl(&pal))?,
+                "ase" => std::fs::write(&out, palettefit::export::to_ase(&pal))?,
+                other => anyhow::bail!(
+                    "unknown export format '{other}': use --format gpl or ase, or an .gpl/.ase file name"
+                ),
+            }
+            eprintln!(
+                "palettefit: wrote {} ({} colors, {format})",
+                out.display(),
+                pal.colors.len()
+            );
+            Ok(ExitCode::SUCCESS)
         }
         Command::Diff {
             a,
@@ -409,5 +497,91 @@ fn check_json(palette: &Palette, t: &Thresholds, images: &[String], any_fail: bo
         t.strict,
         images.join(", "),
         json::quote(if any_fail { "fail" } else { "pass" })
+    )
+}
+
+fn pair_name(c: palettefit::color::Rgb8, label: &Option<String>) -> String {
+    match label {
+        Some(l) => format!("{l} #{}", c.hex()),
+        None => format!("#{}", c.hex()),
+    }
+}
+
+fn contrast_text(
+    st: &Style,
+    path: &std::path::Path,
+    results: &[PairResult],
+    level: Option<Level>,
+) -> String {
+    let mut out = format!("{}: WCAG 2.2 contrast\n", path.display());
+    let width = results
+        .iter()
+        .map(|r| pair_name(r.a, &r.a_label).len() + pair_name(r.b, &r.b_label).len() + 4)
+        .max()
+        .unwrap_or(0);
+    for r in results {
+        let label = format!(
+            "{} on {}",
+            pair_name(r.a, &r.a_label),
+            pair_name(r.b, &r.b_label)
+        );
+        let meets: Vec<&str> = r.meets.iter().map(|l| l.as_str()).collect();
+        let _ = write!(
+            out,
+            "  {}{} {label:<width$}  {:>6.2}:1  {}",
+            st.swatch(r.a),
+            st.swatch(r.b),
+            r.ratio,
+            if meets.is_empty() {
+                "-".to_string()
+            } else {
+                meets.join(" ")
+            }
+        );
+        if let Some(level) = level {
+            let _ = write!(
+                out,
+                "  {}",
+                if r.meets_level(level) { "PASS" } else { "FAIL" }
+            );
+        }
+        out.push('\n');
+    }
+    if let Some(level) = level {
+        let failed = results.iter().filter(|r| !r.meets_level(level)).count();
+        let _ = writeln!(
+            out,
+            "{} of {} pair(s) below {} ({}:1)",
+            failed,
+            results.len(),
+            level.as_str(),
+            level.minimum()
+        );
+    }
+    out
+}
+
+fn contrast_json(results: &[PairResult], level: Option<Level>) -> String {
+    let mut items = Vec::new();
+    for r in results {
+        let meets: Vec<String> = r.meets.iter().map(|l| json::quote(l.as_str())).collect();
+        let pass = match level {
+            Some(l) => r.meets_level(l).to_string(),
+            None => "null".to_string(),
+        };
+        items.push(format!(
+            "    {{\"fg\": {}, \"fg_label\": {}, \"bg\": {}, \"bg_label\": {}, \"ratio\": {:.4}, \"meets\": [{}], \"pass\": {pass}}}",
+            json::quote(&format!("#{}", r.a.hex())),
+            json::opt_str(r.a_label.as_deref()),
+            json::quote(&format!("#{}", r.b.hex())),
+            json::opt_str(r.b_label.as_deref()),
+            r.ratio,
+            meets.join(", ")
+        ));
+    }
+    format!(
+        "{{\n  \"standard\": \"WCAG 2.2\",\n  \"level\": {},\n  \"pairs\": [\n{}\n  ]\n}}",
+        level.map_or("null".to_string(), |l| json::quote(l.as_str())),
+        items.join(",\n")
     )
 }

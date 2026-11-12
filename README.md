@@ -99,6 +99,44 @@ palettefit diff approved-cover.png revised-cover.png
 Reports each dominant color of the baseline, its nearest match in the other
 image, and the weighted mean/max CIEDE2000 distance.
 
+### 4. Check text and UI contrast (WCAG 2.2)
+
+```sh
+palettefit contrast miko.palette
+palettefit contrast miko.palette --pairs eyes:skin,hair:skin --level aa
+```
+
+```
+miko.palette: WCAG 2.2 contrast
+  eyes #1d3557 on skin #f1faee   11.56:1  aa aa-large aaa aaa-large non-text  PASS
+  hair #e63946 on skin #f1faee    3.90:1  aa-large non-text  FAIL
+1 of 2 pair(s) below aa (4.5:1)
+```
+
+Without `--pairs` every pair of palette colors is listed, highest ratio first,
+with the levels it meets, and nothing fails. With `--pairs fg:bg,...` (labels
+or hex values) each pair is held to `--level` and the exit code is 1 when one
+falls short. The levels are the WCAG 2.2 minimums: `aa` 4.5:1 and `aa-large`
+3:1 (1.4.3), `aaa` 7:1 and `aaa-large` 4.5:1 (1.4.6), and `non-text` 3:1 for
+user interface components and graphics (1.4.11). Relative luminance and the
+contrast ratio follow the WCAG 2.2 definitions (sRGB linearized with the
+0.04045 threshold), and ratios are compared unrounded, so 4.49:1 does not pass
+AA. Source: [WCAG 2.2](https://www.w3.org/TR/WCAG22/), read 2026-11-12.
+
+### 5. Export the palette to a design tool
+
+```sh
+palettefit export miko.palette -o miko.gpl   # GIMP, Krita, Inkscape palettes
+palettefit export miko.palette -o miko.ase   # Adobe Swatch Exchange
+```
+
+The file extension picks the format (or pass `--format gpl|ase`). Each color is
+named by its label, or by its hex value when it has none, and the palette name
+becomes the GPL `Name:` and the ASE group name. ASE colors are written as RGB
+in 0..1 with the normal (not global, not spot) color type. Both layouts follow
+what GIMP's palette loader reads (`app/core/gimppalette-load.c`, read
+2026-11-12), and a test walks the ASE file the same way.
+
 ## How it works
 
 1. Pixels are sampled on a fixed grid (at most ~262k samples), transparent
@@ -137,7 +175,7 @@ art, too noisy for painterly full scenes.
 
 ## JSON output
 
-Every subcommand takes `--json` and prints a single JSON document on stdout:
+Every subcommand but `export` takes `--json` and prints a single JSON document on stdout:
 
 ```sh
 palettefit check pages/*.png -p miko.palette --json | jq '.images[].verdict'
@@ -146,7 +184,9 @@ palettefit check pages/*.png -p miko.palette --json | jq '.images[].verdict'
 The check document carries the palette, the thresholds used, and per image:
 per-color `status`/`delta_e`/`nearest`, the `foreign` list, `foreign_share`,
 and a `verdict`. The extract document carries the detected `background`,
-`excluded_share` and the extracted `colors` with weights.
+`excluded_share` and the extracted `colors` with weights. The contrast document
+carries `standard`, the `level` (or `null` without `--pairs`) and `pairs`, each
+with `fg`, `bg`, their labels, `ratio`, the levels it `meets`, and `pass`.
 
 ## CI example
 
